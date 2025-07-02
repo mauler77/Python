@@ -1,0 +1,396 @@
+import customtkinter as ctk
+import yt_dlp
+import subprocess
+import os
+import threading
+import sys
+import datetime
+import shutil
+import traceback
+import logging
+import  platform
+
+log_file = os.path.join(os.path.expanduser('~'), 'Downloads', 'netrunner_debug.log')
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(log_file),
+        logging.StreamHandler()
+    ]
+)
+
+CYBER_BG = "#0D0221"
+CYBER_PRIMARY = "#00F0FF"
+CYBER_SECONDARY = "#FF00FF"
+CYBER_TEXT = "#F0F0F0"
+CYBER_BORDER = "#2A1B5C"
+
+
+class App(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+
+        logging.info("=== ЗАПУСК NET_RUNNER ===")
+        logging.info(f"Рабочая директория: {os.getcwd()}")
+        logging.info(f"Путь к скрипту: {sys.argv[0]}")
+        logging.info(f"Переменная PATH: {os.environ.get('PATH', 'НЕ НАЙДЕНА')}")
+        logging.info(f"Frozen (собранное приложение): {getattr(sys, 'frozen', False)}")
+
+        self.withdraw()
+
+        self.title(">> NET_RUNNER v1.2 <<")
+        self.minsize(700, 900)
+        self.resizable(False, False)
+        self.configure(fg_color=CYBER_BG)
+
+        self.main_font = ctk.CTkFont(family="Courier New", size=14, weight="bold")
+        self.title_font = ctk.CTkFont(family="Courier New", size=28, weight="bold")
+        self.small_font = ctk.CTkFont(family="Courier New", size=12)
+        self.history_font = ctk.CTkFont(family="Courier New", size=13)
+
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(2, weight=1)
+        self.grid_rowconfigure(3, weight=2)
+
+        header_frame = ctk.CTkFrame(self, fg_color="transparent")
+        header_frame.grid(row=0, column=0, padx=20, pady=(20, 10), sticky="ew")
+        app_title = ctk.CTkLabel(header_frame, text="> Y T _ D O W N L O A D _ M O D U L E <", font=self.title_font,
+                                 text_color=CYBER_PRIMARY)
+        app_title.pack()
+
+        downloader_frame = ctk.CTkFrame(self, fg_color=CYBER_BG, border_color=CYBER_BORDER, border_width=2,
+                                        corner_radius=0)
+        downloader_frame.grid(row=1, column=0, padx=20, pady=10, sticky="new")
+        downloader_frame.grid_columnconfigure(0, weight=1)
+
+        url_label = ctk.CTkLabel(downloader_frame, text="// ВВЕДИТЕ DATA STREAM URL:", font=self.main_font,
+                                 text_color=CYBER_TEXT)
+        url_label.grid(row=0, column=0, padx=20, pady=(20, 5), sticky="w")
+
+        self.Entry = ctk.CTkEntry(downloader_frame, placeholder_text="https://...", fg_color="#100a26",
+                                  border_color=CYBER_PRIMARY, border_width=1, text_color=CYBER_TEXT,
+                                  font=self.main_font, corner_radius=0, height=40)
+        self.Entry.grid(row=1, column=0, padx=20, pady=5, sticky="ew")
+
+        button_frame = ctk.CTkFrame(downloader_frame, fg_color="transparent")
+        button_frame.grid(row=2, column=0, padx=20, pady=20, sticky="ew")
+        button_frame.grid_columnconfigure((0, 1), weight=1)
+
+        start_browser_button = ctk.CTkButton(button_frame, text="ПОДКЛЮЧИТЬСЯ К СЕТИ",
+                                             command=lambda: self.start_browser(), font=self.main_font,
+                                             fg_color="transparent", border_color=CYBER_SECONDARY,
+                                             text_color=CYBER_SECONDARY, hover_color="#4b004b", border_width=2,
+                                             corner_radius=0, height=40)
+        start_browser_button.grid(row=0, column=0, padx=(0, 10), sticky="ew")
+
+        self.download_button = ctk.CTkButton(button_frame, text="ИНИЦИИРОВАТЬ ЗАГРУЗКУ",
+                                             command=lambda: self.start_download_thread(), font=self.main_font,
+                                             fg_color=CYBER_PRIMARY, text_color=CYBER_BG, hover_color="#99FDFF",
+                                             corner_radius=0, height=40)
+        self.download_button.grid(row=0, column=1, padx=(10, 0), sticky="ew")
+
+        self.progress_label = ctk.CTkLabel(downloader_frame, text="СТАТУС: СИСТЕМА В РЕЖИМЕ ОЖИДАНИЯ...",
+                                           font=self.small_font, text_color=CYBER_PRIMARY)
+        self.progress_label.grid(row=3, column=0, padx=20, pady=(0, 20))
+
+        session_log_main_frame = ctk.CTkFrame(self, fg_color="transparent")
+        session_log_main_frame.grid(row=2, column=0, padx=20, pady=(0, 10), sticky="nsew")
+        session_log_main_frame.grid_rowconfigure(1, weight=1)
+        session_log_main_frame.grid_columnconfigure(0, weight=1)
+
+        session_log_title = ctk.CTkLabel(session_log_main_frame, text=">> ЖУРНАЛ АКТИВНОСТИ <<", font=self.main_font,
+                                         text_color=CYBER_TEXT)
+        session_log_title.grid(row=0, column=0, pady=(0, 10))
+
+        self.session_log_frame = ctk.CTkScrollableFrame(session_log_main_frame, fg_color=CYBER_BG,
+                                                        border_color=CYBER_BORDER, border_width=2, corner_radius=0)
+        self.session_log_frame.grid(row=1, column=0, sticky="nsew")
+        self.session_log_frame.grid_columnconfigure(0, weight=1)
+        self.session_log_entries = []
+
+        downloaded_files_main_frame = ctk.CTkFrame(self, fg_color="transparent")
+        downloaded_files_main_frame.grid(row=3, column=0, padx=20, pady=(0, 10), sticky="nsew")
+        downloaded_files_main_frame.grid_rowconfigure(1, weight=1)
+        downloaded_files_main_frame.grid_columnconfigure(0, weight=1)
+
+        downloaded_files_title = ctk.CTkLabel(downloaded_files_main_frame, text=">> ФАЙЛЫ ЗАГРУЗОК <<",
+                                              font=self.main_font, text_color=CYBER_TEXT)
+        downloaded_files_title.grid(row=0, column=0, pady=(0, 10))
+
+        self.downloaded_files_browser_frame = ctk.CTkScrollableFrame(downloaded_files_main_frame, fg_color=CYBER_BG,
+                                                                     border_color=CYBER_BORDER, border_width=2,
+                                                                     corner_radius=0)
+        self.downloaded_files_browser_frame.grid(row=1, column=0, sticky="nsew")
+        self.downloaded_files_browser_frame.grid_columnconfigure(0, weight=1)
+
+        self.update_idletasks()
+        w_calculated = self.winfo_width()
+        h_calculated = self.winfo_height()
+        final_width = max(w_calculated, 700)
+        final_height = max(h_calculated, 900)
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        x = (screen_width // 2) - (final_width // 2)
+        y = (screen_height // 2) - (final_height // 2)
+        self.geometry(f"{final_width}x{final_height}+{x}+{y}")
+        self.deiconify()
+
+        self.refresh_downloaded_files_browser()
+
+    def find_ffmpeg_path(self):
+        logging.info("🔍 НАЧИНАЮ ПОИСК FFMPEG...")
+
+        if getattr(sys, 'frozen', False):
+            bundled_ffmpeg = os.path.join(sys._MEIPASS, 'ffmpeg')
+            logging.info(f"Проверяю встроенный ffmpeg: {bundled_ffmpeg}")
+            if os.path.exists(bundled_ffmpeg):
+                logging.info(f"✅ НАЙДЕН ВСТРОЕННЫЙ FFMPEG: {bundled_ffmpeg}")
+                return bundled_ffmpeg
+
+        logging.info("Ищу ffmpeg в системном PATH...")
+        ffmpeg_in_path = shutil.which('ffmpeg')
+        if ffmpeg_in_path:
+            logging.info(f"✅ НАЙДЕН FFMPEG В PATH: {ffmpeg_in_path}")
+            return ffmpeg_in_path
+
+        standard_paths = [
+            '/usr/local/bin/ffmpeg',
+            '/opt/homebrew/bin/ffmpeg',
+            '/usr/bin/ffmpeg',
+            '/opt/local/bin/ffmpeg'
+        ]
+
+        logging.info("Проверяю стандартные пути...")
+        for path in standard_paths:
+            logging.info(f"Проверяю: {path}")
+            if os.path.exists(path):
+                logging.info(f"✅ НАЙДЕН FFMPEG: {path}")
+                return path
+
+        logging.warning("❌ FFMPEG НЕ НАЙДЕН!")
+        return None
+
+    def start_browser(self):
+        url = "https://youtube.com"
+        try:
+            if os.name == 'nt':
+                os.startfile(url)
+            elif platform.system() == 'Darwin':
+                subprocess.run(['open', url])
+            else:
+                subprocess.run(['xdg-open', url])
+        except Exception as e:
+            self.progress_label.configure(text=f"ОШИБКА: Не удалось открыть браузер. {e}")
+
+    def start_download_thread(self):
+        download_thread = threading.Thread(target=self.download_video, daemon=True)
+        download_thread.start()
+
+    def download_video(self):
+        url = self.Entry.get()
+        logging.info(f"=== НАЧАЛО ЗАГРУЗКИ ===")
+        logging.info(f"URL: {url}")
+
+        if not url:
+            error_msg = "ОШИБКА: URL НЕ УКАЗАН. ПРЕРЫВАНИЕ."
+            logging.error(error_msg)
+            self.progress_label.configure(text=error_msg)
+            return
+
+        self.download_button.configure(state="disabled", text="ЗАГРУЗКА...")
+
+        download_path = os.path.join(os.path.expanduser('~'), 'Downloads', '%(title)s.%(ext)s')
+        logging.info(f"Путь сохранения: {download_path}")
+
+        ffmpeg_path = self.find_ffmpeg_path()
+
+        ydl_opts = {
+            'outtmpl': download_path,
+            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best',
+            'progress_hooks': [self.progress_hook],
+            'verbose': True,
+        }
+
+        if ffmpeg_path:
+            ydl_opts['ffmpeg_location'] = ffmpeg_path
+            logging.info(f"📍 ИСПОЛЬЗУЮ FFMPEG: {ffmpeg_path}")
+        else:
+            logging.warning("⚠️  FFMPEG НЕ НАЙДЕН - ПОПРОБУЕМ БЕЗ НЕГО")
+
+        try:
+            logging.info(f"🚀 НАЧИНАЮ СКАЧИВАНИЕ: {url}")
+            logging.info(f"Настройки yt-dlp: {ydl_opts}")
+
+            with yt_dlp.YoutubeDL({'quiet': True}) as test_ydl:
+                logging.info("Проверяю доступность видео...")
+                info = test_ydl.extract_info(url, download=False)
+                logging.info(f"Видео найдено: {info.get('title', 'Неизвестно')}")
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info_dict = ydl.extract_info(url, download=True)
+
+            logging.info("✅ СКАЧИВАНИЕ ЗАВЕРШЕНО УСПЕШНО!")
+            self.add_session_log_entry(info_dict, success_flag=True)
+            self.after(100, self.refresh_downloaded_files_browser)
+
+        except Exception as e:
+            logging.error("❌ ОШИБКА ПРИ СКАЧИВАНИИ!")
+            logging.error(f"📄 ДЕТАЛИ ОШИБКИ: {str(e)}")
+            logging.error(f"ПОЛНАЯ ТРАССИРОВКА:\n{traceback.format_exc()}")
+
+            if "ffmpeg" in str(e).lower():
+                error_msg = f"ОШИБКА FFMPEG: {str(e)}"
+                logging.error("💡 СОВЕТ: Установите ffmpeg через Homebrew: brew install ffmpeg")
+            elif "network" in str(e).lower() or "connection" in str(e).lower():
+                error_msg = f"СЕТЕВАЯ ОШИБКА: {str(e)}"
+                logging.error("💡 СОВЕТ: Проверьте интернет-соединение")
+            elif "unavailable" in str(e).lower():
+                error_msg = f"ВИДЕО НЕДОСТУПНО: {str(e)}"
+                logging.error("💡 СОВЕТ: Проверьте URL или попробуйте другое видео")
+            else:
+                error_msg = f"НЕИЗВЕСТНАЯ ОШИБКА: {str(e)}"
+
+            self.progress_label.configure(text=f"ОШИБКА: {error_msg[:50]}...")
+
+            error_info = {'title': f"НЕУДАЧА: {url[:30]}...", 'filepath': None, 'error': error_msg}
+            self.add_session_log_entry(error_info, success_flag=False)
+
+        finally:
+            self.download_button.configure(state="normal", text="ИНИЦИИРОВАТЬ ЗАГРУЗКУ")
+            self.progress_label.configure(text="СИСТЕМА В РЕЖИМЕ ОЖИДАНИЯ...")
+            logging.info("=== КОНЕЦ ОПЕРАЦИИ ЗАГРУЗКИ ===")
+
+    def add_session_log_entry(self, info, success_flag):
+        is_error = not success_flag
+        filepath = info.get('filepath')
+        filename = os.path.basename(filepath) if filepath else info['title']
+
+        entry_frame = ctk.CTkFrame(self.session_log_frame, fg_color="#1a113d", corner_radius=0)
+        entry_frame.grid(padx=10, pady=5, sticky="ew")
+        entry_frame.grid_columnconfigure(0, weight=1)
+        self.session_log_entries.insert(0, entry_frame)
+
+        for i, frame in enumerate(self.session_log_entries):
+            frame.grid(row=i, column=0, padx=10, pady=5, sticky="ew")
+
+        display_name = (filename[:40] + '...') if len(filename) > 40 else filename
+        name_label = ctk.CTkLabel(entry_frame, text=display_name, font=self.history_font, text_color=CYBER_TEXT,
+                                  anchor="w")
+        name_label.grid(row=0, column=0, padx=10, pady=5, sticky="w")
+
+        status_text = "ОШИБКА" if is_error else "ЗАВЕРШЕНО"
+        status_color = CYBER_SECONDARY if is_error else CYBER_PRIMARY
+        status_label = ctk.CTkLabel(entry_frame, text=f"СТАТУС: {status_text}", font=self.small_font,
+                                    text_color=status_color)
+        status_label.grid(row=1, column=0, padx=10, pady=(0, 5), sticky="w")
+
+        if success_flag and filepath and os.path.exists(filepath):
+            buttons_frame = ctk.CTkFrame(entry_frame, fg_color="transparent")
+            buttons_frame.grid(row=0, column=1, rowspan=2, padx=10, pady=5, sticky="e")
+
+            folder_button = ctk.CTkButton(buttons_frame, text="ПАПКА", font=self.small_font, width=80, height=25,
+                                          corner_radius=0, fg_color="transparent", border_width=1,
+                                          border_color=CYBER_TEXT, command=lambda p=filepath: self.open_folder(p))
+            folder_button.pack(side="left", padx=(0, 5))
+
+            open_button = ctk.CTkButton(buttons_frame, text="ОТКРЫТЬ", font=self.small_font, width=80, height=25,
+                                        corner_radius=0, fg_color=CYBER_TEXT, text_color=CYBER_BG,
+                                        command=lambda p=filepath: self.open_file(p))
+            open_button.pack(side="left")
+
+    def refresh_downloaded_files_browser(self):
+        for widget in self.downloaded_files_browser_frame.winfo_children():
+            widget.destroy()
+
+        downloads_dir = os.path.join(os.path.expanduser('~'), 'Downloads')
+        if not os.path.exists(downloads_dir):
+            ctk.CTkLabel(self.downloaded_files_browser_frame,
+                         text="ОШИБКА: Папка 'Downloads' не найдена или недоступна.",
+                         font=self.small_font, text_color=CYBER_SECONDARY).pack(pady=10)
+            return
+
+        files_info = []
+        for filename in os.listdir(downloads_dir):
+            filepath = os.path.join(downloads_dir, filename)
+            if os.path.isfile(filepath):
+                try:
+                    file_size = os.path.getsize(filepath)
+                    mod_time = os.path.getmtime(filepath)
+                    files_info.append({'name': filename, 'path': filepath, 'size': file_size, 'mod_time': mod_time})
+                except Exception:
+                    pass
+
+        files_info.sort(key=lambda x: x['mod_time'], reverse=True)
+
+        if not files_info:
+            ctk.CTkLabel(self.downloaded_files_browser_frame, text="ФАЙЛЫ НЕ НАЙДЕНЫ В ПАПКЕ 'Downloads'.",
+                         font=self.small_font, text_color=CYBER_TEXT).pack(pady=10)
+            return
+
+        for file_data in files_info:
+            file_frame = ctk.CTkFrame(self.downloaded_files_browser_frame, fg_color="#1a113d", corner_radius=0)
+            file_frame.pack(fill="x", padx=10, pady=3)
+            file_frame.grid_columnconfigure(0, weight=1)
+
+            name_label = ctk.CTkLabel(file_frame, text=file_data['name'], font=self.history_font, text_color=CYBER_TEXT,
+                                      anchor="w")
+            name_label.grid(row=0, column=0, padx=10, pady=2, sticky="w")
+
+            size_mb = file_data['size'] / (1024 * 1024)
+            size_display = f"{size_mb:.2f} MB" if size_mb > 1 else f"{file_data['size'] / 1024:.2f} KB"
+            size_label = ctk.CTkLabel(file_frame, text=size_display, font=self.small_font, text_color="#888888",
+                                      anchor="w")
+            size_label.grid(row=1, column=0, padx=10, pady=(0, 2), sticky="w")
+
+            buttons_frame = ctk.CTkFrame(file_frame, fg_color="transparent")
+            buttons_frame.grid(row=0, column=1, rowspan=2, padx=10, pady=5, sticky="e")
+
+            folder_button = ctk.CTkButton(buttons_frame, text="ПАПКА", font=self.small_font, width=70, height=25,
+                                          corner_radius=0, fg_color="transparent", border_width=1,
+                                          border_color=CYBER_TEXT,
+                                          command=lambda p=file_data['path']: self.open_folder(p))
+            folder_button.pack(side="left", padx=(0, 5))
+
+            open_button = ctk.CTkButton(buttons_frame, text="ОТКРЫТЬ", font=self.small_font, width=70, height=25,
+                                        corner_radius=0, fg_color=CYBER_TEXT, text_color=CYBER_BG,
+                                        command=lambda p=file_data['path']: self.open_file(p))
+            open_button.pack(side="left")
+
+        self.update_idletasks()
+
+    def open_file(self, path):
+        try:
+            if os.name == 'nt':
+                os.startfile(path)
+            elif os.uname().sysname == 'Darwin':
+                subprocess.run(['open', path])
+            else:
+                subprocess.run(['xdg-open', path])
+        except Exception:
+            self.progress_label.configure(text=f"ОШИБКА: НЕ УДАЛОСЬ ОТКРЫТЬ ФАЙЛ")
+
+    def open_folder(self, path):
+        self.open_file(os.path.dirname(path))
+
+    def progress_hook(self, d):
+        if d['status'] == 'downloading':
+            percent = d.get('_percent_str', 'N/A').strip()
+            speed = d.get('_speed_str', 'N/A').strip()
+            self.progress_label.configure(text=f"ПЕРЕДАЧА ДАННЫХ: {percent} | СКОРОСТЬ: {speed}")
+        elif d['status'] == 'finished':
+            self.progress_label.configure(text="ТРАНЗАКЦИЯ ЗАВЕРШЕНА. ФАЙЛ В БЕЗОПАСНОСТИ.")
+        elif d['status'] == 'error':
+            self.progress_label.configure(text="ОШИБКА: ПОТОК ПРЕРВАН.")
+
+
+if __name__ == "__main__":
+    logging.info("Создаю приложение...")
+    try:
+        app = App()
+        logging.info("Приложение создано успешно, запускаю mainloop...")
+        app.mainloop()
+    except Exception as e:
+        logging.error(f"КРИТИЧЕСКАЯ ОШИБКА ПРИ ЗАПУСКЕ: {e}")
+        logging.error(f"ТРАССИРОВКА:\n{traceback.format_exc()}")
+        raise
